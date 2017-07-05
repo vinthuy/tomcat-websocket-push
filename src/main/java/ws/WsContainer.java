@@ -4,12 +4,12 @@ package ws;
 import ws.client.WsProxyClient;
 import ws.server.PushServer;
 
+import javax.websocket.Session;
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 
 /**
  * the web-socket container
@@ -21,16 +21,22 @@ public class WsContainer {
 
     private PushServer pushServer;
 
-    private WsProxyClient wsProxyClient;
-
-    private ExecutorService clientThreadPool = Executors.newFixedThreadPool(2);
+    private List<WsProxyClient> wsProxyClients;
 
     private Map<PushMsgType, WsResultHandler> resultHandlerMap = new ConcurrentHashMap<PushMsgType, WsResultHandler>();
 
+    private int wsProxyClientMaxCount = 2;
+
+    //Òµï¿½ï¿½ï¿½ï¿½ï¿½ß³Ì³ï¿½,ï¿½ï¿½Îªï¿½É²ï¿½Í¬tomcatï¿½ï¿½ï¿½ß³Ì³Ø¹ï¿½ï¿½ï¿½,ï¿½Ñ´ïµ½ï¿½É¿ï¿½ï¿½ï¿½.
+    private ExecutorService clientThreadPool = Executors.newFixedThreadPool(2 * wsProxyClientMaxCount);
+
+
+    //ï¿½ï¿½ï¿½ï¿½ß³ï¿½
+    private ScheduledExecutorService checkTh;
+
 
     WsContainer() {
-        registerWsResultHandler(PushMsgType.OK, new OkWsResultHandlerImpl());
-
+        wsProxyClients = new ArrayList<WsProxyClient>();
     }
 
     public void registerWsResultHandler(PushMsgType pushMsgTyp, WsResultHandler wsResultHandler) {
@@ -45,42 +51,62 @@ public class WsContainer {
         return null;
     }
 
-    public static class PushMsgType {
-
-        private static List<PushMsgType> list = new ArrayList<PushMsgType>();
-
-        public PushMsgType(int tag) {
-            this.tag = tag;
-            list.add(this);
-        }
-
-        private int tag;
-
-        public int getTag() {
-            return tag;
-        }
-
-
-        public static PushMsgType OK = new PushMsgType(0);
-
-        public static PushMsgType getPushMsgType(int f) {
-            for (PushMsgType pushMsgType : list) {
-                if (pushMsgType.getTag() == f) {
-                    return pushMsgType;
-                }
-            }
-            return null;
-        }
-    }
-
-
-    //³õÊ¼»¯²Ù×÷
     public static void initServer() {
         wsContainer.pushServer = new PushServer();
     }
 
-    public static void initClient(String url) {
-        wsContainer.wsProxyClient = new WsProxyClient(url);
+    public interface WsConfigFace<T extends WsContainer.WsConfigDO> {
+        boolean initWsClient(T wsConfigDO);
+    }
+
+    public static class WsConfigDO implements Serializable {
+
+    }
+
+    /**
+     * trigger ws client  in start wsclient.
+     *
+     * @param wsConfigFace
+     * @param wsConfigDO
+     */
+    public void triggerClient(final WsConfigFace wsConfigFace, final WsConfigDO wsConfigDO) {
+        if(wsConfigFace.initWsClient(wsConfigDO)){
+            checkTh = Executors.newSingleThreadScheduledExecutor();
+            checkTh.scheduleAtFixedRate(new Runnable() {
+                public void run() {
+                    List<WsProxyClient> list = WsContainer.instance().getWsProxyClients();
+                    if (list==null||list.isEmpty()) {
+                        wsConfigFace.initWsClient(wsConfigDO);
+                    } else {
+                        for (WsProxyClient wsProxyClient : list) {
+                            //ï¿½Ô¶ï¿½ï¿½ï¿½ï¿½ï¿½
+                            if (wsProxyClient.getSession() == null || !wsProxyClient.getSession().isOpen()) {
+                                wsProxyClient.newSession();
+                            }else {
+                                if(!wsProxyClient.heart()){
+                                    wsProxyClient.newSession();
+                                }
+                            }
+                        }
+                    }
+                }
+            }, 120, 90, TimeUnit.SECONDS);
+        }
+    }
+
+
+    public boolean newWsProxyClient(String url) {
+        if (wsProxyClients.size() >= wsProxyClientMaxCount) {
+            return false;
+        }
+        synchronized (this) {
+            if (wsProxyClients.size() >= wsProxyClientMaxCount) {
+                return false;
+            }
+            WsProxyClient wsProxyClient = new WsProxyClient(url);
+            wsProxyClients.add(wsProxyClient);
+        }
+        return true;
     }
 
     public static WsContainer instance() {
@@ -100,10 +126,18 @@ public class WsContainer {
     }
 
 
-    public WsProxyClient getWsProxyClient() {
-        return wsProxyClient;
+    public WsProxyClient getWsProxyClient(Session session) {
+        for (WsProxyClient wsProxyClient : wsProxyClients) {
+            if (wsProxyClient.getSession().getId().equals(session.getId())) {
+                return wsProxyClient;
+            }
+        }
+        return null;
     }
 
+    public List<WsProxyClient> getWsProxyClients() {
+        return wsProxyClients;
+    }
 
     public ExecutorService getClientThreadPool() {
         return clientThreadPool;

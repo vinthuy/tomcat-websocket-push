@@ -17,9 +17,9 @@ import java.io.IOException;
 public class WsClientServlet extends HttpServlet {
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
-        WsContainer.initClient("ws://localhost:8081/pushClient.ws");
-        WsProxyClient wsProxyClient = WsContainer.instance().getWsProxyClient();
-        wsProxyClient.sendText("hello");
+//        WsContainer.initClient("ws://localhost:8081/pushClient.ws");
+//        WsProxyClient wsProxyClient = WsContainer.instance().getWsProxyClient();
+//        wsProxyClient.sendText("hello");
         super.doGet(req, resp);
     }
 }

@@ -12,4 +12,9 @@ public class OkWsResultHandlerImpl implements WsResultHandler {
         System.out.println(JSONObject.toJSONString(wsRequest));
         return WsResult.buildSimpleSuccessResult();
     }
+
+    @Override
+    public Object getObj(WsResult wsResult) {
+        return wsResult.getData();
+    }
 }

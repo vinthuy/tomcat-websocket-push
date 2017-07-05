@@ -18,8 +18,8 @@ import java.io.IOException;
 public class WsPushServlet extends HttpServlet {
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
-        WsResult wsResult = WsResult.buildSuccessWsResult(WsContainer.PushMsgType.OK.getTag(), 123);
-        WsContainer.instance().getPushServer().sendText(JSON.toJSONString(wsResult));
+//        WsResult wsResult = WsResult.buildSuccessWsResult(WsContainer.PushMsgType.OK.getTag(), 123);
+//        WsContainer.instance().getPushServer().sendText(JSON.toJSONString(wsResult));
         super.doGet(req, resp);
     }
 }

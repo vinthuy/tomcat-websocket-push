@@ -3,7 +3,7 @@ package ws.model;
 import java.io.Serializable;
 
 /**
- * 浼犺緭瀹炰綋
+ * 传输实体
  * Created by ruiyong.hry on 02/07/2017.
  */
 public class WsResult implements Serializable {
@@ -14,7 +14,7 @@ public class WsResult implements Serializable {
 
     private String msg;
 
-    //鏁版嵁绫诲瀷
+    //数据类型
     private int flag;
 
 

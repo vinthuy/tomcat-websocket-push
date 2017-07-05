@@ -9,8 +9,8 @@ import ws.model.WsResult;
 import javax.websocket.*;
 
 /**
- * websocketä»£ç†å®¢æˆ·ç«¯
- * æ¥å—æ¥è‡ªæœåŠ¡ç«¯çš„æ¨é€æ¶ˆæ¯
+ * websocket´úÀí¿Í»§¶Ë
+ * ½ÓÊÜÀ´×Ô·şÎñ¶ËµÄÍÆËÍÏûÏ¢
  *
  * @author ruiyong.hry
  */
@@ -31,15 +31,15 @@ public class WsProxyClientEndpoint {
     }
 
     /**
-     * è¿™ä¸ªæ¶ˆæ¯æ˜¯æœåŠ¡ç«¯æ¨é€çš„.
-     * å¯¹äºå®¢æˆ·ç«¯æˆ‘ä»¬é‡‡é›†å¤šçº¿ç¨‹å¤„ç†
+     * Õâ¸öÏûÏ¢ÊÇ·şÎñ¶ËÍÆËÍµÄ.
+     * ¶ÔÓÚ¿Í»§¶ËÎÒÃÇ²É¼¯¶àÏß³Ì´¦Àí
      *
      * @param message
      */
     @OnMessage
     public void processMessage(String message, Session session) {
-        //1.è½¬æ¢æˆå¯è¯†åˆ«çš„json
-        WsContainer.instance().getClientThreadPool().submit(new WsProxyClientTask(message));
+        //1.×ª»»³É¿ÉÊ¶±ğµÄjson
+        WsContainer.instance().getClientThreadPool().submit(new WsProxyClientTask(message, session));
     }
 
     @OnError
@@ -50,9 +50,11 @@ public class WsProxyClientEndpoint {
     static class WsProxyClientTask implements Runnable {
 
         private String message;
+        private Session session;
 
-        public WsProxyClientTask(String message) {
+        public WsProxyClientTask(String message, Session session) {
             this.message = message;
+            this.session = session;
         }
 
         public void run() {
@@ -62,13 +64,15 @@ public class WsProxyClientEndpoint {
                     WsResultHandler wsResultHandler = WsContainer.instance().findWsResultHandler(wsResult.getFlag());
                     if (wsResultHandler != null) {
                         WsResult wsrsp = wsResultHandler.handle(wsResult);
-                        WsContainer.instance().getWsProxyClient().sendText(JSON.toJSONString(wsrsp));
+                        if (wsrsp != null) {
+                            WsContainer.instance().getWsProxyClient(session).SendWsResultProtocol(wsrsp);
+                        }
                     } else {
                         Constants.wslogger.warn("message is dropped:" + message);
                     }
                 }
             } catch (Exception e) {
-                //æ¶ˆæ¯ä¸åˆç¬¦è´µæ–¹ä¸¢å¼ƒ
+                //ÏûÏ¢²»ºÏ·û¹ó·½¶ªÆú
                 Constants.wslogger.error("Handle message failed!!->" + e.getMessage(), e);
             }
 

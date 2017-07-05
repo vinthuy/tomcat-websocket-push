@@ -1,15 +1,12 @@
 package ws;
 
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.impl.LogFactoryImpl;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
- * 常量
  * Created by ruiyong.hry on 02/07/2017.
  */
 public class Constants {
-
-    public static final Log wslogger = LogFactoryImpl.getLog(Constants.class);
-
+    public static final Logger wslogger = LoggerFactory.getLogger(Constants.class);
 }
