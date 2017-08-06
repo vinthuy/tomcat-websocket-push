@@ -7,11 +7,12 @@ import ws.model.WsResult;
  * 消息处理器
  * Created by ruiyong.hry on 02/07/2017.
  */
-public interface WsResultHandler<W> {
+public abstract class WsResultHandler<W> {
 
-    public WsResult handle(WsResult wsRequest);
+    public abstract WsResult handle(WsResult wsRequest);
 
-    public W getObj(WsResult wsResult);
-
+    public W getObj(WsResult wsResult) {
+        return (W) wsResult.getData();
+    }
 
 }

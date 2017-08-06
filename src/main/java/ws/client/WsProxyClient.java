@@ -1,11 +1,7 @@
 package ws.client;
 
 
-import com.alibaba.fastjson.JSONObject;
-import org.apache.commons.lang3.StringUtils;
 import ws.Constants;
-import ws.SenderApi;
-import ws.model.WsResult;
 
 import javax.websocket.ContainerProvider;
 import javax.websocket.Session;
@@ -19,28 +15,51 @@ import java.nio.ByteBuffer;
  * 保持客户端一个连接用于推送
  * Created by ruiyong.hry on 02/07/2017.
  */
-public class WsProxyClient implements SenderApi {
+public class WsProxyClient {
 
     private WebSocketContainer container;
-    //格式:"ws://localhost:8080/ws/pushClient.ws"
+    //格式:"ws://localhost:8080/ws/"
     private String url;
+
+    private URI uri;
 
     public WsProxyClient(String url) {
         this.url = url;
         container = ContainerProvider.getWebSocketContainer();
+        uri = URI.create(url);
         newSession();
     }
 
-    private static final byte[] heartBytes = new byte[]{1,0,1};
+    private volatile boolean abledConnect = true;
+
+    private volatile long connectCount = 0;
+
 
     private Session session;
 
+    private ByteBuffer byteBuffer;
+
+    public boolean isDisabledConnect() {
+        return !abledConnect;
+    }
+
     public void newSession() {
+        //当超过了500连接错误,不再连接了
+        if (connectCount > 500 & abledConnect) {
+            abledConnect = false;
+        }
+
+        if (isDisabledConnect()) {
+            return;
+        }
+
         try {
-            Constants.wslogger.info("Connecting to " + url);
-            session = container.connectToServer(WsProxyClientEndpoint.class, URI.create(url));
+            Constants.wslogger.warn("Connecting to " + url);
+            session = container.connectToServer(WsProxyClientEndpoint.class, uri);
+            byteBuffer = ByteBuffer.allocate(Constants.requestHeartBytes.length);
         } catch (Exception ex) {
-            Constants.wslogger.error(ex.getMessage(), ex);
+            connectCount++;
+            Constants.wslogger.error("wsClient newSession err: " + ex.getMessage());
             if (session != null) {
                 try {
                     session.close();
@@ -75,12 +94,17 @@ public class WsProxyClient implements SenderApi {
 
     public boolean heart() {
         try {
-            session.getBasicRemote().sendPing(ByteBuffer.wrap(heartBytes));
-        } catch (IOException e) {
-            Constants.wslogger.error("wsClient send ping error ", e);
+            //这儿不能用ping/pong操作,只能实现逻辑的心跳检测
+            byteBuffer.clear();
+            byteBuffer.put(Constants.requestHeartBytes);
+            byteBuffer.flip();
+            session.getBasicRemote().sendBinary(byteBuffer);
+//            session.getBasicRemote().sendBinary(ByteBuffer.wrap(Constants.reponseHeartBytes));
+        } catch (Exception e) {
+            Constants.wslogger.error("wsClient send ping error " + e.getMessage());
             try {
                 session.close();
-            }catch (Exception ex){
+            } catch (Exception ex) {
                 //忽略
             }
             return false;
@@ -92,18 +116,22 @@ public class WsProxyClient implements SenderApi {
         return session;
     }
 
-    @Override
-    public void SendWsResultProtocol(WsResult wsResult) {
-        String msg = null;
-        try {
-            msg = JSONObject.toJSONString(wsResult);
-        } catch (Exception e) {
-            Constants.wslogger.error("wsClient parse message error: " + e.getMessage(), e);
-        }
+//    @Override
+//    public void SendWsResultProtocol(WsResult wsResult) {
+//        String msg = null;
+//        try {
+//            msg = JSONObject.toJSONString(wsResult);
+//        } catch (Exception e) {
+//            Constants.wslogger.error("wsClient parse message error: " + e.getMessage(), e);
+//        }
+//
+//        if (StringUtils.isNotBlank(msg)) {
+//            sendText(msg);
+//        }
+//
+//    }
 
-        if (StringUtils.isNotBlank(msg)) {
-            sendText(msg);
-        }
-
+    public String getUrl() {
+        return url;
     }
 }

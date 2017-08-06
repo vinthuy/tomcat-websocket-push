@@ -2,105 +2,184 @@ package ws;
 
 
 import ws.client.WsProxyClient;
+import ws.client.WsPull;
+import ws.protocol.WsTsPortHandle;
+import ws.protocol.ext.WsResultSenderApi;
+import ws.serialize.SerializeManager;
 import ws.server.PushServer;
+import ws.server.ext.WsServerHttpClient;
+import ws.util.HostServerUtil;
+import lombok.Data;
+import lombok.Getter;
+import org.apache.commons.collections.CollectionUtils;
 
 import javax.websocket.Session;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * the web-socket container
+ * ×¢Òâ,ËùÓÐµÄ¶ÔÍâapi¶¼ÐèÒªµ÷ÓÃcheck()·½·¨
  * Created by ruiyong.hry on 02/07/2017.
  */
 public class WsContainer {
 
-    private static WsContainer wsContainer = new WsContainer();
 
     private PushServer pushServer;
 
     private List<WsProxyClient> wsProxyClients;
 
-    private Map<PushMsgType, WsResultHandler> resultHandlerMap = new ConcurrentHashMap<PushMsgType, WsResultHandler>();
 
-    private int wsProxyClientMaxCount = 2;
-
-    //Òµï¿½ï¿½ï¿½ï¿½ï¿½ß³Ì³ï¿½,ï¿½ï¿½Îªï¿½É²ï¿½Í¬tomcatï¿½ï¿½ï¿½ß³Ì³Ø¹ï¿½ï¿½ï¿½,ï¿½Ñ´ïµ½ï¿½É¿ï¿½ï¿½ï¿½.
-    private ExecutorService clientThreadPool = Executors.newFixedThreadPool(2 * wsProxyClientMaxCount);
+    @Getter
+    private WsConfigDO wsConfigDO;
 
 
-    //ï¿½ï¿½ï¿½ï¿½ß³ï¿½
+    //¼ì²âÏß³Ì
     private ScheduledExecutorService checkTh;
+
+    private volatile boolean configStarted = false;
+
+    private WsPull wsPull;
+
+    private SerializeManager serializeManager;
+
+    private WsTsPortHandle clientWsTsPortHandle;
 
 
     WsContainer() {
         wsProxyClients = new ArrayList<WsProxyClient>();
+        checkTh = Executors.newSingleThreadScheduledExecutor();
     }
 
-    public void registerWsResultHandler(PushMsgType pushMsgTyp, WsResultHandler wsResultHandler) {
-        resultHandlerMap.put(pushMsgTyp, wsResultHandler);
+
+    //³õÊ¼»¯pushServer
+    private void initServer() {
+        pushServer = new PushServer();
+        setServerParam();
+        checkTh.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    pushServer.synchronizedPushToClientSessionToCaChe();
+                } catch (Exception e) {
+                    Constants.wslogger.error("synchronizedPushToClientSessionToCaChe err:" + e.getMessage(), e);
+                }
+            }
+        }, 60, wsConfigDO.serverSyncSessionInterval, TimeUnit.SECONDS);
     }
 
-    public WsResultHandler findWsResultHandler(int f) {
-        PushMsgType pushMsgType = PushMsgType.getPushMsgType(f);
-        if (pushMsgType != null) {
-            return resultHandlerMap.get(pushMsgType);
-        }
-        return null;
-    }
-
-    public static void initServer() {
-        wsContainer.pushServer = new PushServer();
+    //ÉèÖÃ·þÎñÆ÷²ÎÊý
+    private void setServerParam() {
+        pushServer.setWsServerCommunicationClient(new WsServerHttpClient(serializeManager));
+        pushServer.setRetryCountWhenSessionServerIpFail(wsConfigDO.getRetryCountWhenSessionServerIpFail());
+        HostServerUtil.setPort(wsConfigDO.getServerPort());
+        pushServer.setSenderApi(new WsResultSenderApi(pushServer));
     }
 
     public interface WsConfigFace<T extends WsContainer.WsConfigDO> {
         boolean initWsClient(T wsConfigDO);
+
+        boolean postWsServer(T wsConfigDO);
+
+        void checkWsClient(T wsConfigDO, List<WsProxyClient> list);
     }
 
+    //Ä¬ÈÏÊµÏÖ,µ¥ÊÖÆô¶¯api
+    public static class WsConfigFaceDefault implements WsConfigFace {
+        @Override
+        public boolean initWsClient(WsConfigDO wsConfigDO) {
+            return true;
+        }
+
+        @Override
+        public boolean postWsServer(WsConfigDO wsConfigDO) {
+            return true;
+        }
+
+        @Override
+        public void checkWsClient(WsConfigDO wsConfigDO, List list) {
+
+        }
+    }
+
+    @Data
     public static class WsConfigDO implements Serializable {
-
+        //Ä¬ÈÏ10Ò»´ÎÐÄÌø
+        private int heartInterval = 12;
+        private int wsProxyClientMaxCount = 4;
+        private int retryCountWhenSessionServerIpFail = 10;
+        private int serverPort = 80;
+        //·þÎñÆ÷Í¬²½session¼ä¸ô Ä¬ÈÏ60s
+        private int serverSyncSessionInterval = 90;
+        //·¢ËÍ×Ö·û´®³¬¹ý ¾Í×ßÍÆÀ­½áºÏ·½Ê½´«Êä 5K
+        private int pullStrLength = 5120;
+        //ÍÆËÍ³¬Ê±
+        private int pushDataTimeout = 1000 * 30;
     }
+
 
     /**
-     * trigger ws client  in start wsclient.
+     * ¸ù¾ÝÅäÖÃ´¥·¢¿Í»§¶Ë³õÊ¼»¯(Æô¶¯Èë¿Ú)
      *
      * @param wsConfigFace
      * @param wsConfigDO
      */
-    public void triggerClient(final WsConfigFace wsConfigFace, final WsConfigDO wsConfigDO) {
-        if(wsConfigFace.initWsClient(wsConfigDO)){
-            checkTh = Executors.newSingleThreadScheduledExecutor();
+    public synchronized void triggerStart(final WsConfigFace wsConfigFace, final WsConfigDO wsConfigDO) {
+        if (configStarted) {
+            return;
+        }
+        this.wsConfigDO = wsConfigDO;
+        configStarted = true;
+        initServer();
+        wsConfigFace.postWsServer(wsConfigDO);
+
+        if (wsConfigFace.initWsClient(wsConfigDO)) {
+
             checkTh.scheduleAtFixedRate(new Runnable() {
+                @Override
                 public void run() {
-                    List<WsProxyClient> list = WsContainer.instance().getWsProxyClients();
-                    if (list==null||list.isEmpty()) {
-                        wsConfigFace.initWsClient(wsConfigDO);
-                    } else {
-                        for (WsProxyClient wsProxyClient : list) {
-                            //ï¿½Ô¶ï¿½ï¿½ï¿½ï¿½ï¿½
-                            if (wsProxyClient.getSession() == null || !wsProxyClient.getSession().isOpen()) {
-                                wsProxyClient.newSession();
-                            }else {
-                                if(!wsProxyClient.heart()){
+                    try {
+                        List<WsProxyClient> list = getWsProxyClients();
+                        wsConfigFace.checkWsClient(wsConfigDO, list);
+
+                        if (CollectionUtils.isNotEmpty(list)) {
+                            for (WsProxyClient wsProxyClient : list) {
+                                //×Ô¶¯ÖØÁ¬
+                                if (wsProxyClient.getSession() == null || !wsProxyClient.getSession().isOpen()) {
                                     wsProxyClient.newSession();
+                                } else {
+                                    if (wsProxyClient.isDisabledConnect()) {
+                                        return;
+                                    }
+
+                                    if (!wsProxyClient.heart()) {
+                                        wsProxyClient.newSession();
+                                    }
                                 }
                             }
                         }
+                    } catch (Throwable e) {
+                        Constants.wslogger.error("triggerStart.err:" + e.getMessage(), e);
                     }
+
                 }
-            }, 120, 90, TimeUnit.SECONDS);
+            }, 45, wsConfigDO.getHeartInterval(), TimeUnit.SECONDS);
         }
+
     }
 
 
     public boolean newWsProxyClient(String url) {
-        if (wsProxyClients.size() >= wsProxyClientMaxCount) {
+        check();
+        if (wsProxyClients.size() > wsConfigDO.wsProxyClientMaxCount) {
             return false;
         }
         synchronized (this) {
-            if (wsProxyClients.size() >= wsProxyClientMaxCount) {
+            if (wsProxyClients.size() > wsConfigDO.wsProxyClientMaxCount) {
                 return false;
             }
             WsProxyClient wsProxyClient = new WsProxyClient(url);
@@ -109,39 +188,65 @@ public class WsContainer {
         return true;
     }
 
-    public static WsContainer instance() {
-        return wsContainer;
-    }
-
 
     public PushServer getPushServer() {
-        if (pushServer == null) {
-            synchronized (this) {
-                if (pushServer == null) {
-                    initServer();
-                }
-            }
-        }
+        check();
         return pushServer;
     }
 
 
     public WsProxyClient getWsProxyClient(Session session) {
+        check();
         for (WsProxyClient wsProxyClient : wsProxyClients) {
-            if (wsProxyClient.getSession().getId().equals(session.getId())) {
+            if (wsProxyClient.getSession() != null && wsProxyClient.getSession().getId().equals(session.getId())) {
                 return wsProxyClient;
             }
         }
         return null;
     }
 
+    private void check() {
+        if (!configStarted) {
+            throw new RuntimeException("wsContainer is not configStarted!!!");
+        }
+    }
+
     public List<WsProxyClient> getWsProxyClients() {
         return wsProxyClients;
     }
 
-    public ExecutorService getClientThreadPool() {
-        return clientThreadPool;
+
+    public void setWsPull(WsPull wsPull) {
+        this.wsPull = wsPull;
     }
 
+    public WsPull getWsPull() {
+        return wsPull;
+    }
 
+    public void setSerializeManager(SerializeManager serializeManager) {
+        this.serializeManager = serializeManager;
+    }
+
+    public SerializeManager getSerializeManager() {
+        return serializeManager;
+    }
+
+    public WsTsPortHandle getClientWsTsPortHandle() {
+        return clientWsTsPortHandle;
+    }
+
+    public void setClientWsTsPortHandle(WsTsPortHandle clientWsTsPortHandle) {
+        this.clientWsTsPortHandle = clientWsTsPortHandle;
+    }
+
+    private DistributeCacheService distributeCacheService;
+
+    public DistributeCacheService getDistributeCacheService() {
+        return distributeCacheService;
+    }
+
+    public void setDistributeCacheService(DistributeCacheService distributeCacheService) {
+        this.distributeCacheService = distributeCacheService;
+    }
 }
