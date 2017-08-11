@@ -1,9 +1,11 @@
 package ws.util;
 
-import com.tmall.doom.client.config.ConfigManager;
 import ws.model.ServerEndpoint;
-import org.apache.commons.lang.StringUtils;
+import lombok.Getter;
+import lombok.Setter;
+import org.apache.commons.lang3.StringUtils;
 
+import java.net.InetAddress;
 import java.net.UnknownHostException;
 
 /**
@@ -19,7 +21,8 @@ public class HostServerUtil {
             if (StringUtils.isBlank(LocalServerEndpoint.getServerIp())) {
                 synchronized (HostServerUtil.class) {
                     if (StringUtils.isBlank(LocalServerEndpoint.getServerIp())) {
-                        LocalServerEndpoint.setServerIp(ConfigManager.getCurrentHost());
+                        String host = InetAddress.getLocalHost().getHostAddress();
+                        LocalServerEndpoint.setServerIp(host);
                     }
                 }
             }
@@ -36,5 +39,10 @@ public class HostServerUtil {
     public static void setPort(int port) {
         LocalServerEndpoint.setPort(port);
     }
+
+    @Setter
+    @Getter
+    public static int currentServerEnv; //当前服务器环境标识
+
 
 }

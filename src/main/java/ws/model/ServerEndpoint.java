@@ -8,6 +8,7 @@ import java.io.Serializable;
 /**
  * Created by ruiyong.hry on 14/07/2017.
  */
+@Data
 public class ServerEndpoint implements Serializable {
     private String serverIp;
     private int port;
@@ -41,21 +42,5 @@ public class ServerEndpoint implements Serializable {
                 .add("serverIp", serverIp)
                 .add("port", port)
                 .toString();
-    }
-
-    public String getServerIp() {
-        return serverIp;
-    }
-
-    public void setServerIp(String serverIp) {
-        this.serverIp = serverIp;
-    }
-
-    public int getPort() {
-        return port;
-    }
-
-    public void setPort(int port) {
-        this.port = port;
     }
 }

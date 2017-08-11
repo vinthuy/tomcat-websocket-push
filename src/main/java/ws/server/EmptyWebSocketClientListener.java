@@ -1,7 +1,7 @@
 package ws.server;
 
 
-import ws.Constants;
+import ws.WsConstants;
 
 /**
  * Created by ruiyong.hry on 02/07/2017.
@@ -14,6 +14,6 @@ public class EmptyWebSocketClientListener implements WebSocketClientListener {
     }
 
     public void onSelectSessionError(Object msg) {
-        Constants.wslogger.error("Notice:Not find useful web-socket-client session.");
+        WsConstants.wslogger.error("Notice:Not find useful web-socket-client session.");
     }
 }

@@ -1,25 +1,27 @@
 package ws;
 
 
+import com.google.common.collect.Maps;
+import ws.buffer.ByteBufferAllocator;
 import ws.client.WsProxyClient;
-import ws.client.WsPull;
 import ws.protocol.WsTsPortHandle;
-import ws.protocol.ext.WsResultSenderApi;
 import ws.serialize.SerializeManager;
 import ws.server.PushServer;
-import ws.server.ext.WsServerHttpClient;
+import ws.session.WsClientSessionFactory;
+import ws.util.AssertUtils;
 import ws.util.HostServerUtil;
 import lombok.Data;
 import lombok.Getter;
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.lang3.StringUtils;
 
-import javax.websocket.Session;
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Collection;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * the web-socket container
@@ -31,7 +33,7 @@ public class WsContainer {
 
     private PushServer pushServer;
 
-    private List<WsProxyClient> wsProxyClients;
+    private Map<String, WsProxyClient> wsProxyClientMap;
 
 
     @Getter
@@ -43,49 +45,61 @@ public class WsContainer {
 
     private volatile boolean configStarted = false;
 
-    private WsPull wsPull;
-
+    //序列化manager
     private SerializeManager serializeManager;
 
+    //客户端协议处理器--根据具体消息处理
     private WsTsPortHandle clientWsTsPortHandle;
+
+    //连接相关session安全验证等处理
+    private WsSessionGroupManager wsSessionGroupManager;
 
 
     WsContainer() {
-        wsProxyClients = new ArrayList<WsProxyClient>();
+        wsProxyClientMap = Maps.newConcurrentMap();
         checkTh = Executors.newSingleThreadScheduledExecutor();
     }
 
 
     //初始化pushServer
-    private void initServer() {
-        pushServer = new PushServer();
-        setServerParam();
+    private void initServer(WsConfigFace wsConfigFace) {
+        HostServerUtil.setPort(wsConfigDO.getServerPort());
+        pushServer = PushServer.preInstance(this);
+        wsConfigFace.buildPushServer(pushServer);
+        pushServer.create();
         checkTh.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
                 try {
                     pushServer.synchronizedPushToClientSessionToCaChe();
                 } catch (Exception e) {
-                    Constants.wslogger.error("synchronizedPushToClientSessionToCaChe err:" + e.getMessage(), e);
+                    WsConstants.wslogger.error("synchronizedPushToClientSessionToCaChe err:" + e.getMessage(), e);
                 }
             }
         }, 60, wsConfigDO.serverSyncSessionInterval, TimeUnit.SECONDS);
     }
 
-    //设置服务器参数
-    private void setServerParam() {
-        pushServer.setWsServerCommunicationClient(new WsServerHttpClient(serializeManager));
-        pushServer.setRetryCountWhenSessionServerIpFail(wsConfigDO.getRetryCountWhenSessionServerIpFail());
-        HostServerUtil.setPort(wsConfigDO.getServerPort());
-        pushServer.setSenderApi(new WsResultSenderApi(pushServer));
-    }
-
+    /**
+     * 对于扩展容器都需要实现此方法来启动push-server,wsClient
+     *
+     * @param <T>
+     */
     public interface WsConfigFace<T extends WsContainer.WsConfigDO> {
+
         boolean initWsClient(T wsConfigDO);
 
-        boolean postWsServer(T wsConfigDO);
+        void checkWsClient(T wsConfigDO, Collection<WsProxyClient> list);
 
-        void checkWsClient(T wsConfigDO, List<WsProxyClient> list);
+        /**
+         * //pushtoSession listener
+         * private ServerSessionListener serverSessionListener;
+         * private SessionManager sessionManager;
+         * private WsServerCommunicationClient wsServerCommunicationClient;
+         *
+         * @param pushServer
+         */
+        void buildPushServer(PushServer pushServer);
+
     }
 
     //默认实现,单手启动api
@@ -96,12 +110,11 @@ public class WsContainer {
         }
 
         @Override
-        public boolean postWsServer(WsConfigDO wsConfigDO) {
-            return true;
+        public void buildPushServer(PushServer pushServer) {
         }
 
         @Override
-        public void checkWsClient(WsConfigDO wsConfigDO, List list) {
+        public void checkWsClient(WsConfigDO wsConfigDO, Collection list) {
 
         }
     }
@@ -109,47 +122,72 @@ public class WsContainer {
     @Data
     public static class WsConfigDO implements Serializable {
         //默认10一次心跳
-        private int heartInterval = 12;
-        private int wsProxyClientMaxCount = 4;
-        private int retryCountWhenSessionServerIpFail = 10;
-        private int serverPort = 80;
+        protected int heartInterval = 15;
+        protected int wsProxyClientMaxCount = 10;
+        protected int retryCountWhenSessionServerIpFail = 10;
+        protected int serverPort = 80;
         //服务器同步session间隔 默认60s
-        private int serverSyncSessionInterval = 90;
+        protected int serverSyncSessionInterval = 180;
         //发送字符串超过 就走推拉结合方式传输 5K
-        private int pullStrLength = 5120;
+        protected int pullStrOrSplitAtLength = 7168;
         //推送超时
-        private int pushDataTimeout = 1000 * 30;
+        protected int pushDataTimeout = 1000 * 30;
+
+        //是否启动push-server
+        protected boolean wsServerStart = true;
+        //是否启动wsClient连接push-server
+        protected boolean wsClientStart = true;
+        protected int env;
+        //两分钟超时,仅对netty框架有效
+        protected int sessionTimeOut = 120;
     }
 
+
+    /**
+     * 只有是wsClient才能使用
+     *
+     * @param wsConfigFace
+     * @param wsConfigDO
+     */
+    public synchronized void triggerStartOnWsClientMode(final WsConfigFace wsConfigFace, final WsConfigDO wsConfigDO) {
+        if (wsConfigDO.isWsServerStart()) {
+            throw new WsException("please use triggerStart method if wsServerStart is true");
+        }
+        triggerStart(wsConfigFace, wsConfigDO, null);
+    }
 
     /**
      * 根据配置触发客户端初始化(启动入口)
      *
      * @param wsConfigFace
      * @param wsConfigDO
+     * @param wsSessionGroupManager 对连接session进行管理
      */
-    public synchronized void triggerStart(final WsConfigFace wsConfigFace, final WsConfigDO wsConfigDO) {
+    public synchronized void triggerStart(final WsConfigFace wsConfigFace, final WsConfigDO wsConfigDO, WsSessionGroupManager wsSessionGroupManager) {
         if (configStarted) {
             return;
         }
         this.wsConfigDO = wsConfigDO;
+        HostServerUtil.setCurrentServerEnv(wsConfigDO.getEnv());
+
+        this.wsSessionGroupManager = wsSessionGroupManager;
+//        heartBufferPool = ByteBufferPool.newInstance(6).newAllocator(1000);
         configStarted = true;
-        initServer();
-        wsConfigFace.postWsServer(wsConfigDO);
-
-        if (wsConfigFace.initWsClient(wsConfigDO)) {
-
+        if (wsConfigDO.isWsServerStart()) {
+            initServer(wsConfigFace);
+        }
+        if (wsConfigDO.isWsClientStart() && wsConfigFace.initWsClient(wsConfigDO)) {
             checkTh.scheduleAtFixedRate(new Runnable() {
                 @Override
                 public void run() {
                     try {
-                        List<WsProxyClient> list = getWsProxyClients();
+                        Collection<WsProxyClient> list = wsProxyClientMap.values();
                         wsConfigFace.checkWsClient(wsConfigDO, list);
 
                         if (CollectionUtils.isNotEmpty(list)) {
                             for (WsProxyClient wsProxyClient : list) {
                                 //自动重连
-                                if (wsProxyClient.getSession() == null || !wsProxyClient.getSession().isOpen()) {
+                                if (wsProxyClient.getWsClientSession() == null || !wsProxyClient.getWsClientSession().isOpen()) {
                                     wsProxyClient.newSession();
                                 } else {
                                     if (wsProxyClient.isDisabledConnect()) {
@@ -163,7 +201,7 @@ public class WsContainer {
                             }
                         }
                     } catch (Throwable e) {
-                        Constants.wslogger.error("triggerStart.err:" + e.getMessage(), e);
+                        WsConstants.wslogger.error("triggerStart.err:" + e.getMessage(), e);
                     }
 
                 }
@@ -173,17 +211,20 @@ public class WsContainer {
     }
 
 
-    public boolean newWsProxyClient(String url) {
+    public boolean newWsProxyClient(String url, WsClientSessionFactory wsClientSessionFactory) {
         check();
-        if (wsProxyClients.size() > wsConfigDO.wsProxyClientMaxCount) {
+        if (wsProxyClientMap.size() > wsConfigDO.wsProxyClientMaxCount) {
+            WsConstants.wslogger.warn(String.format(" %s not connect,wsProxyClientMaxCount:%s", url, wsConfigDO.getWsProxyClientMaxCount()));
             return false;
         }
         synchronized (this) {
-            if (wsProxyClients.size() > wsConfigDO.wsProxyClientMaxCount) {
+            if (wsProxyClientMap.size() > wsConfigDO.wsProxyClientMaxCount) {
                 return false;
             }
-            WsProxyClient wsProxyClient = new WsProxyClient(url);
-            wsProxyClients.add(wsProxyClient);
+            WsProxyClient wsProxyClient = new WsProxyClient(this, url, wsClientSessionFactory);
+            if(wsProxyClient.getSessionId()!=null){
+                wsProxyClientMap.put(wsProxyClient.getSessionId(), wsProxyClient);
+            }
         }
         return true;
     }
@@ -195,34 +236,56 @@ public class WsContainer {
     }
 
 
-    public WsProxyClient getWsProxyClient(Session session) {
+    public WsProxyClient getWsProxyClient(String sessionId) {
         check();
-        for (WsProxyClient wsProxyClient : wsProxyClients) {
-            if (wsProxyClient.getSession() != null && wsProxyClient.getSession().getId().equals(session.getId())) {
+        return wsProxyClientMap.get(sessionId);
+    }
+
+    /**
+     * 根据请求地址获取wsProxyClient
+     *
+     * @param url
+     * @return
+     */
+    public WsProxyClient getWsProxyClientByUrlAddr(String url) {
+        check();
+        for (Map.Entry<String, WsProxyClient> entry : wsProxyClientMap.entrySet()) {
+            WsProxyClient wsProxyClient = entry.getValue();
+            if (StringUtils.equals(wsProxyClient.getUrl(), url)) {
                 return wsProxyClient;
             }
         }
         return null;
     }
 
+    /**
+     * 返回第一个连接
+     *
+     * @return
+     */
+    public WsProxyClient getWsProxyClientRadmon() {
+        check();
+        for (Map.Entry<String, WsProxyClient> entry : wsProxyClientMap.entrySet()) {
+            WsProxyClient wsProxyClient = entry.getValue();
+            if (wsProxyClient != null) {
+                return wsProxyClient;
+            }
+        }
+        return null;
+    }
+
+
     private void check() {
         if (!configStarted) {
             throw new RuntimeException("wsContainer is not configStarted!!!");
         }
+        if (wsConfigDO.isWsServerStart()) {
+            AssertUtils.notNull(wsSessionGroupManager);
+        }
+        AssertUtils.notNull(clientWsTsPortHandle);
+        AssertUtils.notNull(serializeManager);
     }
 
-    public List<WsProxyClient> getWsProxyClients() {
-        return wsProxyClients;
-    }
-
-
-    public void setWsPull(WsPull wsPull) {
-        this.wsPull = wsPull;
-    }
-
-    public WsPull getWsPull() {
-        return wsPull;
-    }
 
     public void setSerializeManager(SerializeManager serializeManager) {
         this.serializeManager = serializeManager;
@@ -240,13 +303,23 @@ public class WsContainer {
         this.clientWsTsPortHandle = clientWsTsPortHandle;
     }
 
-    private DistributeCacheService distributeCacheService;
-
-    public DistributeCacheService getDistributeCacheService() {
-        return distributeCacheService;
+    public WsSessionGroupManager getWsSessionGroupManager() {
+        return wsSessionGroupManager;
     }
 
-    public void setDistributeCacheService(DistributeCacheService distributeCacheService) {
-        this.distributeCacheService = distributeCacheService;
+    public void setWsSessionGroupManager(WsSessionGroupManager wsSessionGroupManager) {
+        this.wsSessionGroupManager = wsSessionGroupManager;
     }
+
+    public static ByteBufferAllocator heartBufferPool;
+
+
+    //推送ID生成器
+    private static AtomicLong PushGenID = new AtomicLong(0);
+
+    public static long genPushDataId() {
+        return PushGenID.incrementAndGet();
+    }
+
+
 }

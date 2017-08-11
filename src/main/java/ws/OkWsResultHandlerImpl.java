@@ -9,6 +9,7 @@ import ws.model.WsResult;
  */
 public class OkWsResultHandlerImpl extends WsResultHandler {
     public WsResult handle(WsResult wsRequest) {
+        WsConstants.wslogger.warn(JSONObject.toJSONString(wsRequest));
         System.out.println(JSONObject.toJSONString(wsRequest));
         wsRequest.setData("finished");
         return wsRequest;

@@ -1,6 +1,7 @@
 package ws.serialize;
 
-import com.tmall.doom.client.util.HessianUtils;
+
+import ws.util.HessianUtils;
 
 /**
  * Created by ruiyong.hry on 03/08/2017.

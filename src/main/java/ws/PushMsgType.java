@@ -19,7 +19,7 @@ public class PushMsgType {
     }
 
 
-    public static PushMsgType OK = new PushMsgType(0);
+    public static PushMsgType OK = new PushMsgType(-100);
 
     public static PushMsgType getPushMsgType(int f) {
         for (PushMsgType pushMsgType : list) {

@@ -1,6 +1,7 @@
 package ws.util;
 
 
+import com.google.common.collect.Lists;
 import org.apache.commons.io.IOUtils;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
@@ -18,7 +19,6 @@ import org.slf4j.LoggerFactory;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -33,6 +33,51 @@ public class HttpTools {
 
     private static final Logger logger = LoggerFactory.getLogger(HttpTools.class);
 
+    public static String post(String url, HttpClient client, Map<String, String> param, String cookies) {
+        HttpPost httpPost = new HttpPost(url);
+        httpPost.setConfig(RequestConfig.custom()
+                .setConnectionRequestTimeout(2000)
+                .setConnectTimeout(2000).build());
+
+        List<NameValuePair> paramslist = Lists.newArrayList();
+
+        if (param != null) {
+            for (Map.Entry<String, String> entry : param.entrySet()) {
+                paramslist.add(new BasicNameValuePair(entry.getKey(), entry.getValue()));
+            }
+        }
+        if (cookies != null) {
+            httpPost.addHeader(new BasicHeader("Cookie", cookies));
+        }
+
+        UrlEncodedFormEntity uefEntity = null;
+        try {
+            uefEntity = new UrlEncodedFormEntity(paramslist, utf8);
+        } catch (UnsupportedEncodingException e) {
+        }
+
+        httpPost.setEntity(uefEntity);
+        try {
+            HttpResponse response = client.execute(httpPost);
+            // ªÒ»°«Î«Û◊¥Ã¨
+            int status = response.getStatusLine().getStatusCode();
+            if (status == 200) {
+                BufferedReader br = new BufferedReader(new InputStreamReader(response.getEntity().getContent(), utf8));
+                StringBuilder sb = new StringBuilder();
+                String line = null;
+                while ((line = br.readLine()) != null) {
+                    sb.append(line);
+                }
+                return sb.toString();
+            }
+        } catch (Exception e) {
+            logger.error(e.getMessage(), e);
+        } finally {
+            httpPost.releaseConnection();
+            httpPost.completed();
+        }
+        return null;
+    }
 
     public static byte[] postByte(String url, HttpClient client, byte[] requestBytes) {
         return postByte(url, client, requestBytes, null);
@@ -56,51 +101,6 @@ public class HttpTools {
                 if (contentLength > 0) {
                     return IOUtils.toByteArray(entityResponse.getContent());
                 }
-            }
-        } catch (Exception e) {
-            logger.error(e.getMessage(), e);
-        } finally {
-            httpPost.releaseConnection();
-            httpPost.completed();
-        }
-        return null;
-    }
-    public static String post(String url, HttpClient client, Map<String, String> param, String cookies) {
-        HttpPost httpPost = new HttpPost(url);
-        httpPost.setConfig(RequestConfig.custom()
-                .setConnectionRequestTimeout(2000)
-                .setConnectTimeout(2000).build());
-
-        List<NameValuePair> paramslist = new ArrayList<NameValuePair>();
-
-        if (param != null) {
-            for (Map.Entry<String, String> entry : param.entrySet()) {
-                paramslist.add(new BasicNameValuePair(entry.getKey(), entry.getValue()));
-            }
-        }
-        if (cookies != null) {
-            httpPost.addHeader(new BasicHeader("Cookie", cookies));
-        }
-
-        UrlEncodedFormEntity uefEntity = null;
-        try {
-            uefEntity = new UrlEncodedFormEntity(paramslist, utf8);
-        } catch (UnsupportedEncodingException e) {
-        }
-
-        httpPost.setEntity(uefEntity);
-        try {
-            HttpResponse response = client.execute(httpPost);
-            // Ëé∑ÂèñËØ∑Ê±ÇÁä∂ÊÄÅ
-            int status = response.getStatusLine().getStatusCode();
-            if (status == 200) {
-                BufferedReader br = new BufferedReader(new InputStreamReader(response.getEntity().getContent(), utf8));
-                StringBuilder sb = new StringBuilder();
-                String line = null;
-                while ((line = br.readLine()) != null) {
-                    sb.append(line);
-                }
-                return sb.toString();
             }
         } catch (Exception e) {
             logger.error(e.getMessage(), e);

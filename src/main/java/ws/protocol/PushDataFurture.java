@@ -16,11 +16,13 @@ public interface PushDataFurture {
 
     void done();
 
+    void doneFroSync();
+
 
     Object get() throws InterruptedException;
 
 
-    Object get(long timeout) throws   InterruptedException;
+    Object get(long timeout) throws InterruptedException;
 
 
 }

@@ -1,14 +1,11 @@
 package ws.client;
 
 
-import ws.Constants;
+import ws.WsConstants;
+import ws.WsContainer;
+import ws.session.*;
 
-import javax.websocket.ContainerProvider;
-import javax.websocket.Session;
-import javax.websocket.WebSocketContainer;
-import java.io.IOException;
 import java.net.URI;
-import java.nio.ByteBuffer;
 
 /**
  * the web-socket client.
@@ -17,16 +14,24 @@ import java.nio.ByteBuffer;
  */
 public class WsProxyClient {
 
-    private WebSocketContainer container;
-    //格式:"ws://localhost:8080/ws/"
+
     private String url;
 
     private URI uri;
 
-    public WsProxyClient(String url) {
+    private WsClientSessionFactory sessionFactory;
+
+    private WsClientSessionSenderBase sessesionHander;
+
+    private String sessionId;
+
+    private WsContainer wsContainer;
+
+    public WsProxyClient(WsContainer wsContainer, String url, WsClientSessionFactory sessionFactory) {
+        this.wsContainer = wsContainer;
         this.url = url;
-        container = ContainerProvider.getWebSocketContainer();
         uri = URI.create(url);
+        this.sessionFactory = sessionFactory;
         newSession();
     }
 
@@ -35,13 +40,8 @@ public class WsProxyClient {
     private volatile long connectCount = 0;
 
 
-    private Session session;
+    private WsClientSession wsClientSession;
 
-    private ByteBuffer byteBuffer;
-
-    public boolean isDisabledConnect() {
-        return !abledConnect;
-    }
 
     public void newSession() {
         //当超过了500连接错误,不再连接了
@@ -54,84 +54,83 @@ public class WsProxyClient {
         }
 
         try {
-            Constants.wslogger.warn("Connecting to " + url);
-            session = container.connectToServer(WsProxyClientEndpoint.class, uri);
-            byteBuffer = ByteBuffer.allocate(Constants.requestHeartBytes.length);
+            WsConstants.wslogger.warn("Connecting to " + url);
+            wsClientSession = sessionFactory.newSession(this);
+            sessionId = wsClientSession.id();
+            sessesionHander = (WsClientSessionSenderBase) sessionFactory.newWsClientSessionListener(this);
         } catch (Exception ex) {
             connectCount++;
-            Constants.wslogger.error("wsClient newSession err: " + ex.getMessage());
-            if (session != null) {
+            WsConstants.wslogger.error("wsClient newSession err: " + ex.getMessage());
+            if (wsClientSession != null) {
                 try {
-                    session.close();
-                } catch (IOException e) {
-                    e.printStackTrace();
+                    wsClientSession.close();
+                } catch (Exception e) {
+                    WsConstants.wslogger.error("wsClient newSession err:" + e.getMessage());
                 }
             }
         }
     }
 
-    public void sendText(String message) {
-        if (session == null) {
-            synchronized (this) {
-                if (session == null) {
-                    newSession();
-                }
-            }
-        }
-        if (!session.isOpen()) {
-            //新建一个session
-            synchronized (this) {
-                newSession();
-            }
-        }
 
-        try {
-            session.getBasicRemote().sendText(message);
-        } catch (IOException e) {
-            Constants.wslogger.error("wsClient send message error: " + message, e);
+    public WsProxyClient getSessionIfCloseNew() {
+        if (wsClientSession != null && wsClientSession.isOpen()) {
+            return this;
         }
+        newSession();
+        return this;
+    }
+
+    public boolean isDisabledConnect() {
+        return !abledConnect;
     }
 
     public boolean heart() {
-        try {
-            //这儿不能用ping/pong操作,只能实现逻辑的心跳检测
-            byteBuffer.clear();
-            byteBuffer.put(Constants.requestHeartBytes);
-            byteBuffer.flip();
-            session.getBasicRemote().sendBinary(byteBuffer);
-//            session.getBasicRemote().sendBinary(ByteBuffer.wrap(Constants.reponseHeartBytes));
-        } catch (Exception e) {
-            Constants.wslogger.error("wsClient send ping error " + e.getMessage());
-            try {
-                session.close();
-            } catch (Exception ex) {
-                //忽略
-            }
-            return false;
-        }
-        return true;
+        return wsClientSession.heart();
     }
 
-    public Session getSession() {
-        return session;
+    public <RS> RS sendObj(Object message, boolean sync) throws Exception {
+        return sessesionHander.sendMessage(message, sync);
     }
 
-//    @Override
-//    public void SendWsResultProtocol(WsResult wsResult) {
-//        String msg = null;
-//        try {
-//            msg = JSONObject.toJSONString(wsResult);
-//        } catch (Exception e) {
-//            Constants.wslogger.error("wsClient parse message error: " + e.getMessage(), e);
-//        }
-//
-//        if (StringUtils.isNotBlank(msg)) {
-//            sendText(msg);
-//        }
-//
-//    }
+
+    public long getConnectCount() {
+        return connectCount;
+    }
+
+    public void setConnectCount(long connectCount) {
+        this.connectCount = connectCount;
+    }
+
+    public boolean isAbledConnect() {
+        return abledConnect;
+    }
+
+    public void setAbledConnect(boolean abledConnect) {
+        this.abledConnect = abledConnect;
+    }
 
     public String getUrl() {
         return url;
+    }
+
+    public WsClientSession getWsClientSession() {
+        return wsClientSession;
+    }
+
+
+    public String getSessionId() {
+        return sessionId;
+    }
+
+    public WsContainer getWsContainer() {
+        return wsContainer;
+    }
+
+    public URI getUri() {
+        return uri;
+    }
+
+    public WsClientSessionSenderBase getSessionHandler() {
+        return sessesionHander;
     }
 }

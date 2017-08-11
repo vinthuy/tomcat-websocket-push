@@ -1,13 +1,11 @@
 package ws.protocol.ext;
 
 import com.alibaba.fastjson.JSON;
-import ws.*;
-import ws.client.WsPull;
-import ws.model.PullMsg;
+import ws.PushMsgType;
+import ws.WsConstants;
+import ws.WsResultHandler;
 import ws.model.WsResult;
 import ws.protocol.WsTsPortHandle;
-import ws.util.WsUtil;
-import org.apache.commons.lang.StringUtils;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -37,29 +35,13 @@ public class WsTsPortClientHandleImpl implements WsTsPortHandle<Object, WsResult
         //1.首先判断是否是需要拉取消息,兼容老的方案
         if (request instanceof String) {
             String message = (String) request;
-            if (WsUtil.isPullMsgHeader(message)) {
-                PullMsg pullMsg = WsUtil.splitMsgKey(message);
-                if (pullMsg == null) {
-                    Constants.wslogger.error("pull msg is err.");
-                }
-                WsPull wsPull = WsContainerSingle.instance().getWsPull();
-                if (wsPull == null) {
-                    Constants.wslogger.error("Not support pull big data");
-                }
-                message = wsPull.pull(pullMsg);
-                if (StringUtils.isBlank(message)) {
-                    Constants.wslogger.error("pull msg is null or error");
-                    return null;
-                }
-            }
             WsResult wsResult = JSON.parseObject(message, WsResult.class);
             if (wsResult.isSuccess()) {
                 WsResultHandler wsResultHandler = findWsResultHandler(wsResult.getFlag());
                 if (wsResultHandler != null) {
                     return wsResultHandler.handle(wsResult);
                 } else {
-                    Constants.wslogger.warn("message is dropped:" + message);
-                    wsResultHandler = new OkWsResultHandlerImpl();
+                    WsConstants.wslogger.warn("message is dropped:" + message);
                     return wsResultHandler.handle(wsResult);
                 }
             }

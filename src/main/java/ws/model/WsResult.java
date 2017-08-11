@@ -41,6 +41,13 @@ public class WsResult implements Serializable {
         return wsResult;
     }
 
+    public static WsResult buildSimpleFailResult() {
+        WsResult wsResult = new WsResult();
+        wsResult.setFlag(0);
+        wsResult.setSuccess(true);
+        return wsResult;
+    }
+
     public int getFlag() {
         return flag;
     }

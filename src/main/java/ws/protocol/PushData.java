@@ -1,6 +1,7 @@
 package ws.protocol;
 
-import ws.server.PushToClientSession;
+import ws.WsContainerSingle;
+import ws.session.WsSessionAPI;
 import ws.util.WsUtil;
 
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -20,12 +21,13 @@ public class PushData<RE> implements PushDataFurture {
     //    private Object sendData;
     private int maxWaiteDefault = 15 * 1000;
 
-    private int intervelWait = 500;
+    private int intervelWait = 3000;
 
     private RE sendData;
 
-    public PushData(PushToClientSession pushToClientSession, RE _sendData) {
-        genRequestId(pushToClientSession.getSession().getId(), pushToClientSession.getPushServer().genPushDataId());
+
+    public PushData(WsSessionAPI sessionAPI, RE _sendData) {
+        genRequestId(sessionAPI.id(), WsContainerSingle.instance().genPushDataId());
         sendData = _sendData;
         done = false;
         pushResponse = new ConcurrentLinkedDeque<byte[]>();
@@ -48,6 +50,14 @@ public class PushData<RE> implements PushDataFurture {
     @Override
     public void done() {
         this.done = true;
+    }
+
+    @Override
+    public void doneFroSync() {
+        synchronized (this) {
+            done();
+            notifyAll();
+        }
     }
 
     @Override
@@ -80,6 +90,7 @@ public class PushData<RE> implements PushDataFurture {
         return getPushResponse();
     }
 
+
     public byte[] getPushResponse() {
         if (pushResponse != null) {
             return WsUtil.joinByte(pushResponse);
@@ -93,6 +104,8 @@ public class PushData<RE> implements PushDataFurture {
         protected String requestId;
         //        protected int index;
         protected byte[] data;
+
+        protected byte msgType;
 
         public String getRequestId() {
             return requestId;
@@ -109,6 +122,14 @@ public class PushData<RE> implements PushDataFurture {
 //        public void setIndex(int index) {
 //            this.index = index;
 //        }
+
+        public byte getMsgType() {
+            return msgType;
+        }
+
+        public void setMsgType(byte msgType) {
+            this.msgType = msgType;
+        }
 
         public byte[] getData() {
             return data;

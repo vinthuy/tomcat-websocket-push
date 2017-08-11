@@ -9,6 +9,7 @@ import java.io.Serializable;
  * the EnvCacheValue
  * Created by ruiyong.hry on 14/07/2017.
  */
+@Data
 public class EnvCacheValue implements Serializable {
     //key ---
     private ServerEndpoint serverEndpoint;
@@ -24,29 +25,5 @@ public class EnvCacheValue implements Serializable {
                 .add("serverEndpointPort", serverEndpoint.getPort())
                 .add("serverEnv", serverEnv)
                 .toString();
-    }
-
-    public ServerEndpoint getServerEndpoint() {
-        return serverEndpoint;
-    }
-
-    public void setServerEndpoint(ServerEndpoint serverEndpoint) {
-        this.serverEndpoint = serverEndpoint;
-    }
-
-    public int getServerEnv() {
-        return serverEnv;
-    }
-
-    public void setServerEnv(int serverEnv) {
-        this.serverEnv = serverEnv;
-    }
-
-    public int getSessionCount() {
-        return sessionCount;
-    }
-
-    public void setSessionCount(int sessionCount) {
-        this.sessionCount = sessionCount;
     }
 }
